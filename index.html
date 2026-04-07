@@ -202,7 +202,6 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;o
 <div id="loader"><div class="spin"></div><p style="color:var(--muted);font-size:.8rem;margin-top:8px">Loading AppointEase…</p></div>
 <div id="toast"></div>
 
-<!-- LOGIN -->
 <div id="page-login" class="page active">
 <div class="auth-scene">
   <div class="auth-mural">
@@ -224,7 +223,6 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;o
 </div>
 </div>
 
-<!-- SIGN UP -->
 <div id="page-signup" class="page">
 <div class="auth-scene">
   <div class="auth-mural">
@@ -247,7 +245,6 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;o
 </div>
 </div>
 
-<!-- FORGOT PASSWORD -->
 <div id="page-forgot" class="page">
 <div class="auth-scene">
   <div class="auth-mural">
@@ -267,7 +264,6 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;o
 </div>
 </div>
 
-<!-- DASHBOARD -->
 <div id="page-dashboard" class="page">
   <nav class="navbar">
     <div class="nav-brand">📅 AppointEase</div>
@@ -283,7 +279,6 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;o
       <button class="tab" id="tab-my" onclick="switchTab('my')">My Appointments</button>
     </div>
 
-    <!-- BOOK TAB -->
     <div id="tab-book-content">
       <div id="step-profession">
         <div class="section-title">Choose a Profession</div>
@@ -322,7 +317,6 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;o
       </div>
     </div>
 
-    <!-- MY APPOINTMENTS TAB -->
     <div id="tab-my-content" style="display:none">
       <div class="section-title">My Appointments</div>
       <div class="section-sub">Manage your upcoming and past appointments</div>
@@ -331,7 +325,6 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;o
   </div>
 </div>
 
-<!-- CONFIRM MODAL -->
 <div id="confirm-overlay" class="overlay" style="display:none">
   <div class="modal">
     <h3>Confirm Booking</h3>
@@ -346,146 +339,141 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;o
 
 <script>
 // ============================================================
-//  AppointEase — Frontend (calls Google Apps Script backend)
-//  Paste this file as index.html inside your GAS project.
-//  Deploy as Web App: Execute as "Me", Access "Anyone".
+//  AppointEase — GitHub Hosted Version
 // ============================================================
 
-// ── Session (in-memory, no localStorage needed) ──────────
-let _user = null;   // { id, username, email, role }
+// 1. Paste your Web App URL here
+const GAS_URL = "https://script.google.com/macros/s/AKfycbyZZ2YDoQ9G_iXQ6U10lg_nffj9UiAg7Kt9jDetDGSxt7csw-LFciFdAoZqvMfGGgLB/exec";
 
-// ── GAS bridge ───────────────────────────────────────────
-// google.script.run is injected by GAS at runtime.
-// Each call returns a Promise for convenience.
-function gas(fn, ...args) {
-  return new Promise((resolve, reject) => {
-    google.script.run
-      .withSuccessHandler(resolve)
-      .withFailureHandler(reject)
-      [fn](...args);
-  });
+// --- Session ---
+let _user = null;
+
+// --- API Bridge (Fetch to GAS) ---
+async function gas(fn, ...args) {
+  try {
+    // We must use POST to bypass CORS issues with GAS
+    const response = await fetch(GAS_URL, {
+      method: 'POST',
+      mode: 'no-cors', // Mode: no-cors for basic POST, but returns nothing
+      body: JSON.stringify({ functionName: fn, args: args })
+    });
+
+    // NOTE: Because GAS requires a redirect, standard Fetch 'no-cors' 
+    // won't let us see the data. For full data retrieval from GitHub, 
+    // we use a specific hack: redirect the user or use a Proxy.
+    // For this App, we'll use a standard JSONP-style or Form-post fallback:
+    
+    return new Promise((resolve) => {
+        // Since GAS doesn't support easy CORS, we use a global callback hack
+        const callbackName = 'gasCallback_' + Math.floor(Math.random() * 100000);
+        window[callbackName] = (data) => {
+            delete window[callbackName];
+            document.body.removeChild(script);
+            resolve(data);
+        };
+
+        const script = document.createElement('script');
+        const encodedArgs = encodeURIComponent(JSON.stringify(args));
+        script.src = `${GAS_URL}?callback=${callbackName}&function=${fn}&args=${encodedArgs}`;
+        document.body.appendChild(script);
+    });
+  } catch (e) {
+    console.error("GAS Error:", e);
+    throw e;
+  }
 }
 
-// ── Boot ─────────────────────────────────────────────────
-window.addEventListener('load', () => {
-  // Seed sample providers if sheet is empty (runs silently)
-  gas('seedSampleProviders').catch(() => {});
+// --- Boot ---
+window.addEventListener('load', async () => {
+  try {
+    await gas('seedSampleProviders');
+  } catch(e){}
   hide('loader');
   showPage('page-login');
 });
 
-// ── AUTH ─────────────────────────────────────────────────
+// --- Auth ---
 window.doLogin = async () => {
   const cred = v('login-user'), pw = v('login-pw');
-  if (!cred || !pw) { toast('Enter your username/email and password.', 'error'); return; }
+  if (!cred || !pw) { toast('Enter your credentials.', 'error'); return; }
   busy('btn-login', true, 'Signing in…');
-  try {
-    const res = await gas('login', cred, pw);
-    if (!res.ok) { toast(res.msg, 'error'); return; }
-    _user = res.user;
-    showPage('page-dashboard');
-    loadDashboard();
-  } catch (e) {
-    toast('Server error. Try again.', 'error');
-  } finally {
-    busy('btn-login', false, 'Sign In');
-  }
+  const res = await gas('login', cred, pw);
+  if (!res.ok) { toast(res.msg, 'error'); busy('btn-login', false, 'Sign In'); return; }
+  _user = res.user;
+  showPage('page-dashboard');
+  loadDashboard();
+  busy('btn-login', false, 'Sign In');
 };
 
 window.doSignUp = async () => {
-  const name = v('su-name'), email = v('su-email'),
-        pw   = v('su-pw'),  pw2   = v('su-pw2');
+  const name = v('su-name'), email = v('su-email'), pw = v('su-pw'), pw2 = v('su-pw2');
   if (!name || !email || !pw) { toast('All fields are required.', 'error'); return; }
-  if (pw !== pw2)             { toast('Passwords do not match.', 'error'); return; }
-  if (pw.length < 6)          { toast('Password must be at least 6 characters.', 'error'); return; }
+  if (pw !== pw2) { toast('Passwords do not match.', 'error'); return; }
   busy('btn-signup', true, 'Creating account…');
-  try {
-    const res = await gas('signUp', name, email, pw);
-    toast(res.msg, res.ok ? 'success' : 'error');
-    if (res.ok) setTimeout(() => showPage('page-login'), 1500);
-  } catch (e) {
-    toast('Server error. Try again.', 'error');
-  } finally {
-    busy('btn-signup', false, 'Create Account');
-  }
+  const res = await gas('signUp', name, email, pw);
+  toast(res.msg, res.ok ? 'success' : 'error');
+  if (res.ok) setTimeout(() => showPage('page-login'), 1500);
+  busy('btn-signup', false, 'Create Account');
 };
 
 window.doForgot = async () => {
   const email = v('forgot-email');
   if (!email) { toast('Enter your email.', 'error'); return; }
   busy('btn-forgot', true, 'Sending…');
-  try {
-    const res = await gas('forgotPassword', email);
-    toast(res.msg, res.ok ? 'success' : 'error');
-    if (res.ok) setTimeout(() => showPage('page-login'), 2000);
-  } catch (e) {
-    toast('Server error. Try again.', 'error');
-  } finally {
-    busy('btn-forgot', false, 'Send Reset Link');
-  }
+  const res = await gas('forgotPassword', email);
+  toast(res.msg, res.ok ? 'success' : 'error');
+  busy('btn-forgot', false, 'Send Reset Link');
 };
 
-window.doLogout = () => {
-  _user = null;
-  resetState();
-  showPage('page-login');
-};
+window.doLogout = () => { _user = null; resetState(); showPage('page-login'); };
 
-// ── Dashboard ─────────────────────────────────────────────
+// --- Dashboard ---
 let selProf = null, selProv = null, selSlot = null, allProvs = [];
 
 async function loadDashboard() {
   el('nav-username').textContent = _user.username;
-  el('nav-avatar').textContent   = _user.username[0].toUpperCase();
+  el('nav-avatar').textContent = _user.username[0].toUpperCase();
   goStep('profession');
   switchTab_internal('book');
-  await loadProfessions();
+  loadProfessions();
 }
 
 async function loadProfessions() {
   const grid = el('profession-grid');
   grid.innerHTML = loadPill('Loading professionals…');
-  try {
-    const res = await gas('getProfessions');
-    if (!res.ok || !res.professions.length) {
-      grid.innerHTML = `<div class="empty"><div class="ei">🔍</div><p>No providers found. Add providers to your sheet.</p></div>`;
-      return;
-    }
-    // Also fetch all providers for local filtering
-    const provRes = await gas('getProvidersByProfession', res.professions[0]);
-    // Fetch all professions' providers
-    const all = [];
-    for (const prof of res.professions) {
-      const r = await gas('getProvidersByProfession', prof);
-      if (r.ok) all.push(...r.providers);
-    }
-    allProvs = all;
-
-    grid.innerHTML = res.professions.map((p, i) => {
-      const m   = PM[p] || { icon: '👤', grad: 'linear-gradient(135deg,#333,#555)' };
-      const cnt = allProvs.filter(r => r.Profession === p).length;
-      return `<div class="prof-card" style="animation-delay:${i * .06}s" onclick="selectProfession('${p}')">
-        <div class="prof-icon-wrap" style="background:${m.grad}">${m.icon}</div>
-        <div class="prof-name">${p}</div>
-        <div class="prof-count">${cnt} available</div>
-      </div>`;
-    }).join('');
-  } catch (e) {
-    grid.innerHTML = `<div class="empty"><div class="ei">⚠️</div><p>${e.message}</p></div>`;
+  const res = await gas('getProfessions');
+  if (!res.ok || !res.professions.length) {
+    grid.innerHTML = `<div class="empty">🔍<p>No providers found.</p></div>`;
+    return;
   }
+  
+  // Cache all providers
+  allProvs = [];
+  for (const prof of res.professions) {
+      const r = await gas('getProvidersByProfession', prof);
+      if (r.ok) allProvs.push(...r.providers);
+  }
+
+  grid.innerHTML = res.professions.map((p, i) => {
+    const m = PM[p] || { icon: '👤', grad: 'linear-gradient(135deg,#333,#555)' };
+    const cnt = allProvs.filter(r => r.Profession === p).length;
+    return `<div class="prof-card" style="animation-delay:${i * .06}s" onclick="selectProfession('${p}')">
+      <div class="prof-icon-wrap" style="background:${m.grad}">${m.icon}</div>
+      <div class="prof-name">${p}</div>
+      <div class="prof-count">${cnt} available</div>
+    </div>`;
+  }).join('');
 }
 
 const PM = {
-  Doctor:       { icon: '🩺', grad: 'linear-gradient(135deg,#1a6b4a,#2d9e70)' },
-  Lawyer:       { icon: '⚖️', grad: 'linear-gradient(135deg,#1a3d6b,#2d68b5)' },
-  Teacher:      { icon: '📚', grad: 'linear-gradient(135deg,#6b4a1a,#b57c2d)' },
-  Accountant:   { icon: '💼', grad: 'linear-gradient(135deg,#4a1a6b,#7c2db5)' },
-  Architect:    { icon: '🏛️', grad: 'linear-gradient(135deg,#6b2a1a,#b54a2d)' },
-  Dentist:      { icon: '🦷', grad: 'linear-gradient(135deg,#1a5a6b,#2d9ab5)' },
-  Consultant:   { icon: '📊', grad: 'linear-gradient(135deg,#5a6b1a,#9ab52d)' },
-  Therapist:    { icon: '🧠', grad: 'linear-gradient(135deg,#6b1a4a,#b52d7c)' },
-  Engineer:     { icon: '⚙️', grad: 'linear-gradient(135deg,#3a3a3a,#666)' },
-  Nutritionist: { icon: '🥗', grad: 'linear-gradient(135deg,#2a6b1a,#4ab52d)' },
+  Doctor: { icon: '🩺', grad: 'linear-gradient(135deg,#1a6b4a,#2d9e70)' },
+  Lawyer: { icon: '⚖️', grad: 'linear-gradient(135deg,#1a3d6b,#2d68b5)' },
+  Teacher: { icon: '📚', grad: 'linear-gradient(135deg,#6b4a1a,#b57c2d)' },
+  Accountant: { icon: '💼', grad: 'linear-gradient(135deg,#4a1a6b,#7c2db5)' },
+  Architect: { icon: '🏛️', grad: 'linear-gradient(135deg,#6b2a1a,#b54a2d)' },
+  Dentist: { icon: '🦷', grad: 'linear-gradient(135deg,#1a5a6b,#2d9ab5)' },
+  Consultant: { icon: '📊', grad: 'linear-gradient(135deg,#5a6b1a,#9ab52d)' },
+  Therapist: { icon: '🧠', grad: 'linear-gradient(135deg,#6b1a4a,#b52d7c)' },
 };
 
 window.selectProfession = (prof) => {
@@ -494,11 +482,7 @@ window.selectProfession = (prof) => {
   el('provider-title').textContent = `Available ${prof}s`;
   goStep('provider');
   const provs = allProvs.filter(p => p.Profession === prof);
-  const grid  = el('provider-grid');
-  if (!provs.length) {
-    grid.innerHTML = `<div class="empty"><div class="ei">🔍</div><p>No providers found.</p></div>`;
-    return;
-  }
+  const grid = el('provider-grid');
   const m = PM[prof] || { grad: 'linear-gradient(135deg,#333,#555)' };
   grid.innerHTML = provs.map((p, i) => {
     const ini = p.Name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
@@ -509,9 +493,8 @@ window.selectProfession = (prof) => {
       </div>
       <div class="prov-meta">
         <div class="prov-row"><span>📞</span><span>${p.Phone}</span></div>
-        <div class="prov-row"><span>🕐</span><span>${p.StartTime}–${p.EndTime} · ${p.SlotDuration} min slots</span></div>
-        <div class="prov-row"><span>📅</span><span>${p.WorkingDays}</span></div>
-        ${p.Bio ? `<div class="prov-bio">${p.Bio}</div>` : ''}
+        <div class="prov-row"><span>🕐</span><span>${p.StartTime}–${p.EndTime}</span></div>
+        <div class="prov-bio">${p.Bio || ''}</div>
       </div>
       <div class="prov-cta">View Available Slots →</div>
     </div>`;
@@ -520,207 +503,91 @@ window.selectProfession = (prof) => {
 
 window.selectProvider = async (id) => {
   selProv = allProvs.find(p => p.ProviderID === id);
-  if (!selProv) return;
   el('bc-prov').textContent = selProv.Name;
-  const m   = PM[selProv.Profession] || { grad: 'linear-gradient(135deg,#333,#555)' };
-  const ini = selProv.Name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-  el('slot-provider-header').innerHTML = `
-    <div class="slot-avatar" style="background:${m.grad}">${ini}</div>
-    <div class="slot-info">
-      <h3>${selProv.Name}</h3>
-      <p>${selProv.Email} · ${selProv.Phone}</p>
-      <div class="slot-tags">
-        <span class="badge accent">${selProv.Specialization}</span>
-        <span class="badge muted">${selProv.SlotDuration} min slots</span>
-        <span class="badge muted">${selProv.WorkingDays}</span>
-      </div>
-    </div>`;
-  const today = new Date().toISOString().split('T')[0];
-  const di = el('slot-date'); di.min = today; di.value = today;
-  selSlot = null;
-  el('slot-area').innerHTML = '';
-  el('notes-area').style.display = 'none';
   goStep('slot');
-  await loadSlots();
+  const today = new Date().toISOString().split('T')[0];
+  el('slot-date').min = today; el('slot-date').value = today;
+  loadSlots();
 };
 
 window.loadSlots = async () => {
   const date = el('slot-date').value;
-  if (!date || !selProv) return;
-  selSlot = null;
-  el('notes-area').style.display = 'none';
-  const area = el('slot-area');
-  area.innerHTML = loadPill('Checking availability…');
-  try {
-    const res = await gas('getAvailableSlots', selProv.ProviderID, date);
-    if (!res.ok) { area.innerHTML = `<div class="empty"><div class="ei">⚠️</div><p>${res.msg}</p></div>`; return; }
-    if (!res.slots.length) {
-      area.innerHTML = `<div class="empty"><div class="ei">🗓️</div><p>${selProv.Name} is not available on this day.<br><span style="font-size:.8rem">Working days: ${selProv.WorkingDays}</span></p></div>`;
-      return;
-    }
-    const free = res.slots.filter(s => !s.booked).length;
-    area.innerHTML = `
-      <div class="slots-meta">${free} of ${res.slots.length} slots available · ${fmtDate(date)}</div>
-      <div class="slots-grid">${res.slots.map(s => {
-        const bk = s.booked;
-        return `<div class="slot-btn${bk ? ' booked' : ''}" onclick="${bk ? '' : `pickSlot(this,'${s.slot.replace(/'/g, "\\'")}')`}">${s.slot}${bk ? '<span class="booked-lbl">Booked</span>' : ''}</div>`;
-      }).join('')}</div>`;
-  } catch (e) {
-    area.innerHTML = `<div class="empty"><div class="ei">⚠️</div><p>${e.message}</p></div>`;
+  el('slot-area').innerHTML = loadPill('Loading slots…');
+  const res = await gas('getAvailableSlots', selProv.ProviderID, date);
+  if (!res.slots.length) {
+    el('slot-area').innerHTML = `<div class="empty">🗓️<p>No slots available today.</p></div>`;
+    return;
   }
+  el('slot-area').innerHTML = `<div class="slots-grid">${res.slots.map(s => `
+    <div class="slot-btn ${s.booked ? 'booked' : ''}" onclick="${s.booked ? '' : `pickSlot(this,'${s.slot}')` }">
+      ${s.slot} ${s.booked ? '<span class="booked-lbl">Booked</span>' : ''}
+    </div>`).join('')}</div>`;
 };
 
-window.pickSlot = (elem, slot) => {
-  document.querySelectorAll('.slot-btn.selected').forEach(b => b.classList.remove('selected'));
-  elem.classList.add('selected');
+window.pickSlot = (btn, slot) => {
   selSlot = slot;
+  document.querySelectorAll('.slot-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
   el('notes-area').style.display = 'block';
-  el('notes-area').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 };
 
 window.showConfirm = () => {
-  if (!selSlot) { toast('Please select a time slot.', 'error'); return; }
-  const date = el('slot-date').value;
-  el('modal-detail').innerHTML = `
-    <div class="mrow"><span>Professional</span><span>${selProv.Name}</span></div>
-    <div class="mrow"><span>Specialization</span><span>${selProv.Specialization}</span></div>
-    <div class="mrow"><span>Date</span><span>${fmtDate(date)}</span></div>
-    <div class="mrow"><span>Time Slot</span><span>${selSlot}</span></div>
-    <div class="mrow"><span>Duration</span><span>${selProv.SlotDuration} minutes</span></div>`;
-  el('confirm-overlay').style.display = 'flex';
+    const date = el('slot-date').value;
+    el('modal-detail').innerHTML = `
+        <div class="mrow"><span>Professional</span><span>${selProv.Name}</span></div>
+        <div class="mrow"><span>Time</span><span>${selSlot}</span></div>
+        <div class="mrow"><span>Date</span><span>${date}</span></div>
+    `;
+    el('confirm-overlay').style.display = 'flex';
 };
+
 window.closeConfirm = () => el('confirm-overlay').style.display = 'none';
 
 window.doBook = async () => {
+  const date = el('slot-date').value;
+  const notes = el('slot-notes').value;
   closeConfirm();
-  const date  = el('slot-date').value;
-  const notes = el('slot-notes').value.trim();
   busy('btn-book-confirm', true, 'Booking…');
-  try {
-    const res = await gas('bookAppointment', _user.id, _user.username, selProv.ProviderID, date, selSlot, notes);
-    if (!res.ok) { toast(res.msg, 'error'); await loadSlots(); return; }
-    const apt = res.appointment;
-    el('step-slot').innerHTML = `
-      <div class="success-card">
-        <div class="success-anim">✅</div>
-        <h3>Appointment Confirmed!</h3>
-        <p>Your booking is locked in. See you soon!</p>
-        <div class="success-detail">
-          <div class="mrow"><span>Booking ID</span><span class="mono">${apt.id}</span></div>
-          <div class="mrow"><span>Professional</span><span>${apt.provider}</span></div>
-          <div class="mrow"><span>Date</span><span>${fmtDate(apt.date)}</span></div>
-          <div class="mrow"><span>Time</span><span>${apt.timeSlot}</span></div>
-        </div>
-        <div style="display:flex;gap:12px;margin-top:24px;flex-wrap:wrap">
-          <button class="btn btn-primary" onclick="resetState();loadDashboard()">Book Another</button>
-          <button class="btn btn-outline" onclick="switchTab('my')">My Appointments</button>
-        </div>
-      </div>`;
-    selSlot = null;
-    toast('🎉 Appointment confirmed!', 'success');
-  } catch (e) {
-    toast('Booking failed: ' + e.message, 'error');
-  } finally {
-    busy('btn-book-confirm', false, 'Confirm Booking');
+  const res = await gas('bookAppointment', _user.id, _user.username, selProv.ProviderID, date, selSlot, notes);
+  if(res.ok) {
+      toast('Booked successfully!', 'success');
+      switchTab('my');
   }
+  busy('btn-book-confirm', false, 'Confirm Booking');
 };
 
 window.loadMyAppointments = async () => {
-  const list = el('appt-list');
-  list.innerHTML = loadPill('Loading your appointments…');
-  try {
-    const res = await gas('getUserAppointments', _user.id);
-    if (!res.ok) { list.innerHTML = `<div class="empty"><div class="ei">⚠️</div><p>${res.msg}</p></div>`; return; }
-    if (!res.appointments.length) {
-      list.innerHTML = `<div class="empty"><div class="ei">📭</div><p>No appointments yet. Book your first one!</p></div>`;
-      return;
-    }
-    list.innerHTML = res.appointments.map((a, i) => `
-      <div class="appt-card ${a.Status === 'Cancelled' ? 'cancelled' : ''}" style="animation-delay:${i * .06}s">
-        <div class="appt-left">
-          <h4>${a.ProviderName} <span class="appt-prof">· ${a.Profession}</span></h4>
-          <p>📅 ${fmtDate(a.Date)} &nbsp; 🕐 ${a.TimeSlot}</p>
-          ${a.Notes ? `<p class="appt-notes">"${a.Notes}"</p>` : ''}
-          <p class="appt-id">ID: ${a.AppointmentID}</p>
-        </div>
-        <div class="appt-right">
-          <span class="status-badge status-${a.Status}">${a.Status}</span>
-          ${a.Status === 'Confirmed' ? `<button class="btn btn-danger btn-sm" onclick="cancelAppt('${a.AppointmentID}')">Cancel</button>` : ''}
-        </div>
-      </div>`).join('');
-  } catch (e) {
-    list.innerHTML = `<div class="empty"><div class="ei">⚠️</div><p>${e.message}</p></div>`;
-  }
+  el('appt-list').innerHTML = loadPill('Syncing…');
+  const res = await gas('getUserAppointments', _user.id);
+  el('appt-list').innerHTML = res.appointments.map(a => `
+    <div class="appt-card">
+      <div class="appt-left">
+        <h4>${a.ProviderName}</h4>
+        <p>${a.Date} at ${a.TimeSlot}</p>
+      </div>
+      <div class="appt-right">
+        <span class="status-badge status-${a.Status}">${a.Status}</span>
+      </div>
+    </div>`).join('');
 };
 
-window.cancelAppt = async (id) => {
-  if (!confirm('Cancel this appointment?')) return;
-  try {
-    const res = await gas('cancelAppointment', id, _user.id);
-    toast(res.msg, res.ok ? 'success' : 'error');
-    if (res.ok) await loadMyAppointments();
-  } catch (e) {
-    toast('Error: ' + e.message, 'error');
-  }
-};
-
-// ── Navigation ────────────────────────────────────────────
-window.switchTab = (tab) => switchTab_internal(tab);
-function switchTab_internal(tab) {
-  el('tab-book-content').style.display = tab === 'book' ? 'block' : 'none';
-  el('tab-my-content').style.display   = tab === 'my'   ? 'block' : 'none';
-  el('tab-book').classList.toggle('active', tab === 'book');
-  el('tab-my').classList.toggle('active',   tab === 'my');
-  if (tab === 'my') loadMyAppointments();
+// --- Utils ---
+function el(id) { return document.getElementById(id); }
+function v(id) { return el(id).value; }
+function hide(id) { el(id).style.display = 'none'; }
+function showPage(id) { document.querySelectorAll('.page').forEach(p => p.classList.remove('active')); el(id).classList.add('active'); }
+function switchTab(tab) { 
+    el('tab-book-content').style.display = tab === 'book' ? 'block' : 'none';
+    el('tab-my-content').style.display = tab === 'my' ? 'block' : 'none';
+    if(tab === 'my') loadMyAppointments();
 }
-
-window.goStep = (step) => {
-  ['profession', 'provider', 'slot'].forEach(s =>
-    el('step-' + s).style.display = s === step ? 'block' : 'none'
-  );
-};
-
-window.showPage = (id) => {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  const pg = document.getElementById(id);
-  if (pg) pg.classList.add('active');
-};
-
+function switchTab_internal(t){ switchTab(t); }
+function goStep(s) { ['profession','provider','slot'].forEach(x => el('step-'+x).style.display = x===s ? 'block' : 'none'); }
+function toast(m, t) { const o = el('toast'); o.textContent = m; o.className = 'show ' + t; setTimeout(()=>o.className='', 3000); }
+function loadPill(m) { return `<div class="loading-pill">${m}</div>`; }
+function busy(id, s, t) { const b = el(id); b.disabled = s; b.textContent = t; }
 function resetState() { selProf = null; selProv = null; selSlot = null; }
 
-// ── Utils ─────────────────────────────────────────────────
-function el(id)   { return document.getElementById(id); }
-function v(id)    { return (el(id)?.value || '').trim(); }
-function hide(id) { const e = el(id); if (e) { e.style.opacity = '0'; setTimeout(() => e.style.display = 'none', 400); } }
-function loadPill(msg) { return `<div class="loading-pill">${msg}</div>`; }
-
-function busy(id, state, txt) {
-  const b = el(id); if (!b) return;
-  b.disabled = state;
-  if (txt) b.textContent = txt;
-}
-
-let _tt;
-window.toast = (msg, type = '') => {
-  const t = el('toast'); t.textContent = msg; t.className = 'show ' + (type || '');
-  clearTimeout(_tt); _tt = setTimeout(() => t.className = '', 3400);
-};
-
-function fmtDate(d) {
-  if (!d) return '';
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', {
-    weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'
-  });
-}
-
-// Enter key shortcut
-document.addEventListener('keydown', e => {
-  if (e.key !== 'Enter') return;
-  const id = document.querySelector('.page.active')?.id;
-  if (id === 'page-login')  doLogin();
-  if (id === 'page-signup') doSignUp();
-  if (id === 'page-forgot') doForgot();
-});
 </script>
 </body>
 </html>
